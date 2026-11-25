@@ -1,0 +1,21 @@
+'use strict';
+const assert=require('node:assert/strict');
+const E=require('./static/engine.js');
+function row(code,credits,grade,group){return E.newCourse(code,code,credits,grade,'',group);}
+const rows=[row('251.205',3,'A0','경영학'),row('4251.002A',3,'B+','기술경영'),row('000.001',3,'S','교양'),row('251.301',3,'F','경영학'),row('251.321',3,'A0','양쪽 인정')];
+const a=E.audit(rows,2024,false,true,'2025');
+assert.equal(a.total,12);assert.equal(a.primary,6);assert.equal(a.tech,6);assert.equal(a.liberal,3);
+assert.equal(a.primaryRequired,6);assert.equal(a.totalRemaining,118);assert.equal(a.primaryRemaining,33);assert.equal(a.techRemaining,33);
+assert.equal(a.gpaCredits,12);assert.ok(Math.abs(a.gpa-2.825)<1e-8);
+const double=E.audit([...rows,row('251.205',3,'A0','경영학')],2024,false,true,'2025');assert.ok(double.duplicateCodes.includes('251.205'));assert.equal(double.total,9);
+const justOne=E.audit([row('000.100',3,'A0','일반선택')],2024,true,false,'unknown');assert.equal(justOne.total,3);assert.equal(justOne.primary,0);assert.equal(justOne.primaryRemaining,60);
+const terms=E.semesters('2026-08-31T12:00:00',2);assert.deepEqual(terms,['2026년 2학기','2027년 1학기']);
+const result=E.plan(a,['one','two'],18,12);assert.ok(result.pending.length>0);result.terms.forEach(t=>{assert.ok(t.credits<=18);assert.ok(t.major<=12)});
+const parsed=E.parseText('학번: 2024-12345\n전필 M2171.002000 경영학과 나의 미래 1 A0\n일선 251.205 회계원리 3 B+\n교양 000.001 교양 예시 3 S');assert.equal(parsed.year,2024);assert.equal(parsed.rows.length,3);assert.equal(parsed.rows[1].group,'일반선택');assert.equal(parsed.rows[1].credits,3);
+const multi=E.parseText('학번: 2022-00000 기술경영\n전필 회계원리 3 A+ 교양 공개교양 3 A 연전 지식경영전략 3 B+\n일선 번호없는과목 2 S',{});assert.equal(multi.rows.length,4);assert.equal(multi.rows[0].code,'251.205');assert.equal(multi.rows[0].group,'경영학');assert.equal(multi.rows[1].grade,'A0');assert.equal(multi.rows[2].group,'기술경영');assert.equal(E.audit(multi.rows,2022,false,true,'2021').total,11);
+const numbered=E.parseText('기술경영\n연전 4251.002A 지식경영전략 3 B');assert.equal(numbered.rows[0].group,'기술경영');assert.equal(E.audit(numbered.rows,2022,false,true,'2024').total,3);
+const teaching=E.parseText('교양 F37.204 컴퓨팅 3 A');assert.equal(teaching.rows[0].code,'F37.204');
+const catalog={'임의 테스트 과목':['F37.204','L0444.000500'],'회계원리':['251.205']};assert.equal(E.parseText('전필 회계원리(영어강의) 3 A',catalog).rows[0].code,'251.205');assert.deepEqual(E.candidateCourses('임의 테스트',catalog).map(x=>x.code),['F37.204','L0444.000500']);assert.equal(E.parseText('교양 임의 테스트 과목 3 A',catalog).rows[0].code,'');
+assert.equal(E.cbaRules(2026).length,10);assert.equal(E.cbaRules(2018).length,11);assert.equal(E.cbaRules(2027),null);
+assert.ok(E.motRules('2026후').find(x=>x.name==='제품서비스개발').codes.includes('M1338.003000'));
+console.log('credit audit, cohort rules, privacy-sensitive parsing, repeated courses, GPA and scheduling: passed');
