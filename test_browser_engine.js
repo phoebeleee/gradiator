@@ -17,6 +17,17 @@ const numbered=E.parseText('기술경영\n연전 4251.002A 지식경영전략 3 
 const teaching=E.parseText('교양 F37.204 컴퓨팅 3 A');assert.equal(teaching.rows[0].code,'F37.204');
 const catalog={'임의 테스트 과목':['F37.204','L0444.000500'],'회계원리':['251.205']};assert.equal(E.parseText('전필 회계원리(영어강의) 3 A',catalog).rows[0].code,'251.205');assert.deepEqual(E.candidateCourses('임의 테스트',catalog).map(x=>x.code),['F37.204','L0444.000500']);assert.equal(E.parseText('교양 임의 테스트 과목 3 A',catalog).rows[0].code,'');
 assert.deepEqual(E.candidateCourses('통계학',{'통계학':['A01.001','B01.001'],'통계학교육':['C01.001']}).map(x=>x.code),['A01.001','B01.001']);
+const item=(str,x,y)=>({str,transform:[1,0,0,1,x,y]});
+const multiColumn=[item('학번: 2022-12345 기술경영',0,180),item('2022학년도 제1학기',26,105),
+ item('교양',0,90),item('첫 번째 과목',26,90),item('3',114,90),item('A+',128,90),
+ item('교양',0,70),item('두 번째 과목',26,70),item('3',114,70),item('A',128,70),
+ item('교양',0,50),item('세 번째로 긴',26,50),item('3',114,50),item('B+',128,50),item('과목 이름',26,40),
+ item('2022학년도 제2학기',176,105),item('연전',150,90),item('네 번째 과목',176,90),item('3',264,90),item('A+',278,90),
+ item('교양',150,70),item('다섯 번째 과목',176,70),item('3',264,70),item('A',278,70),
+ item('교양',150,50),item('여섯 번째 과목',176,50),item('3',264,50),item('S',278,50)];
+const columnText=E.reconstructPage(multiColumn), columnParsed=E.parseText(columnText,{'첫 번째 과목':['111.111','222.222']},{'2022-1':{'첫 번째 과목':['111.111']}});
+assert.equal(columnParsed.rows.length,6);assert.equal(columnParsed.rows[0].code,'111.111');assert.equal(columnParsed.rows[0].term,'2022-1');assert.equal(columnParsed.rows[2].name,'세 번째로 긴과목 이름');assert.equal(columnParsed.rows[3].term,'2022-2');assert.equal(columnParsed.rows[3].group,'기술경영');assert.equal(E.audit(columnParsed.rows,2022,false,true,'2024').total,18);
+assert.ok(E.cbaRules(2022).find(x=>x.name==='조직 영역').codes.includes('M1338.004000'));
 assert.equal(E.cbaRules(2026).length,10);assert.equal(E.cbaRules(2018).length,11);assert.equal(E.cbaRules(2027),null);
 assert.ok(E.motRules('2026후').find(x=>x.name==='제품서비스개발').codes.includes('M1338.003000'));
 console.log('credit audit, cohort rules, privacy-sensitive parsing, repeated courses, GPA and scheduling: passed');
