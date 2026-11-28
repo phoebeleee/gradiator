@@ -31,3 +31,12 @@ assert.ok(E.cbaRules(2022).find(x=>x.name==='조직 영역').codes.includes('M13
 assert.equal(E.cbaRules(2026).length,10);assert.equal(E.cbaRules(2018).length,11);assert.equal(E.cbaRules(2027),null);
 assert.ok(E.motRules('2026후').find(x=>x.name==='제품서비스개발').codes.includes('M1338.003000'));
 console.log('credit audit, cohort rules, privacy-sensitive parsing, repeated courses, GPA and scheduling: passed');
+
+const catalogMatch={'경제원론 2':['200.106','M2649.001200'],'마케팅관리':['251.321','M0000.001000']};
+const nameUnknown=E.newCourse('','경제원론 2',3,'B+','연전','기술경영');
+let same=E.audit([nameUnknown],2022,false,true,'2025',catalogMatch);assert.equal(same.motRequired,3);assert.equal(same.motAreas[0].matches[0].matchKind,'same_name');assert.equal(same.sameNameMatches[0].requiredCodes[0],'200.106');
+const nameOther=E.newCourse('M0000.001000','마케팅관리',3,'A0','전필','경영학');same=E.audit([nameOther],2022,false,false,'2025',catalogMatch);assert.equal(same.areas.find(x=>x.name==='마케팅관리').matches[0].matchKind,'same_name');
+const different=E.newCourse('M0000.001000','마케팅관리 심화',3,'A0','전필','경영학');assert.equal(E.audit([different],2022,false,false,'2025',catalogMatch).areas.find(x=>x.name==='마케팅관리').missing,true);
+const shared=E.newCourse('400.015','공유 필수',3,'A0','연전','기술경영');same=E.audit([shared],2022,false,true,'2025');assert.equal(same.motRequired,3);assert.equal(same.motAreas.reduce((x,y)=>x+y.matches.length,0),1);
+const X=require('./static/external.js');assert.equal(X.examResult('general','toeic','900','2027-03-02','2027','1').state,'pass');assert.equal(X.examResult('general','toeic','900','2027-03-01','2027','1').state,'fail');assert.equal(X.examResult('general','toeic','899','2027-03-02','2027','1').state,'fail');assert.equal(X.examResult('speaking','opic','3','2027-09-02','2027','2').state,'pass');assert.equal(X.examResult('writing','toefl_new','4','','2027','1').state,'unknown');assert.equal(X.examResult('general','toeic','10000','2027-03-02','2027','1').state,'unknown');
+console.log('same-name exception, exclusive required areas and external English tests: passed');
