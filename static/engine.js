@@ -82,7 +82,7 @@ function parseText(text,catalog={},history={}){
   const line=lines[n].replace(/\s+/g,' ').trim();const semester=line.match(/(20\d{2})\s*학년도\s*제?\s*([12SW])\s*학기/i);if(semester)term=semester[1]+'-'+semester[2].toUpperCase();const codes=[...line.matchAll(codeRe)];
   if(!codes.length){
    const categoryLine=/(?:^|\s)(교양|전필|전선|일선|연전|부전|복전|복필|복선|연계|교직|설계)\s+((?:(?!\s(?:교양|전필|전선|일선|연전|부전|복전|복필|복선|연계|교직|설계)\s).)+?)\s+(\d(?:\.0)?)\s+([ABCD](?:[+0-])?|[FSPU])(?=\s|$)/gi;
-   for(const m of line.matchAll(categoryLine)){let original=m[1],name=m[2].trim(),grade=m[4].toUpperCase();if(['A','B','C','D'].includes(grade))grade+='0';let group=original==='교양'?'교양':['전필','전선'].includes(original)?'경영학':original==='일선'?'일반선택':original==='연전'&&text.includes('기술경영')?'기술경영':'검토 필요';let row=newCourse(resolveName(name,catalog,history[term]),name,Number(m[3]),grade,original,group);row.term=term;rows.push(row);}
+   for(const m of line.matchAll(categoryLine)){let original=m[1],name=m[2].trim(),grade=m[4].toUpperCase();if(['A','B','C','D'].includes(grade))grade+='0';let group=original==='교양'?'교양':['전필','전선'].includes(original)?'경영학':original==='일선'?'일반선택':original==='연전'&&text.includes('기술경영')?'기술경영':'검토 필요';let row=newCourse(resolveName(name,catalog,history[term]),name,Number(m[3]),grade,original,group);row.term=term;row.codeInferred=!!row.code;rows.push(row);}
    continue;
   }
   if(codes.length!==1){unresolved.push(n+1);continue;}
@@ -101,22 +101,30 @@ function parseText(text,catalog={},history={}){
  return {rows,year:year?Number(year[1]):null,unresolved};
 }
 function norm(r){let grade=String(r.grade||'').trim().toUpperCase();if(['A','B','C','D'].includes(grade))grade+='0';return {...r,code:String(r.code||'').trim().toUpperCase(),grade,credits:Number(r.credits)};}
-function audit(rows,year,single,mot,motVersion){
+function audit(rows,year,single,mot,motVersion,catalog={}){
  const cba=cbaRules(year); if(!cba)return {error:'2018~2026학번 경영대학 기준만 지원합니다.'};
  let eligible=[], valid=[], unresolved=[], dup={};
  for(const raw of rows){const r=norm(raw);if(!r.include)continue;const identity=r.code||normalizedName(r.name);if(!identity||!Number.isFinite(r.credits)||r.credits<=0||r.credits>12||(!PASS.has(r.grade)&&!FAILED.has(r.grade))){unresolved.push(r);continue;}r.identity=identity;dup[identity]=(dup[identity]||0)+1;eligible.push(r);}
  const duplicateCodes=Object.keys(dup).filter(k=>dup[k]>1); eligible=eligible.filter(r=>{if(dup[r.identity]>1){unresolved.push(r);return false;}return true;});valid=eligible.filter(r=>PASS.has(r.grade));
  const total=valid.reduce((a,r)=>a+r.credits,0), liberal=valid.filter(r=>r.group==='교양').reduce((a,r)=>a+r.credits,0), primary=valid.filter(r=>r.group==='경영학'||r.group==='양쪽 인정').reduce((a,r)=>a+r.credits,0), tech=valid.filter(r=>r.group==='기술경영'||r.group==='양쪽 인정').reduce((a,r)=>a+r.credits,0);
  const pCourses=valid.filter(r=>r.group==='경영학'||r.group==='양쪽 인정'); const mCourses=valid.filter(r=>r.group==='기술경영'||r.group==='양쪽 인정');
- let areas=cba.map(g=>{let matches=pCourses.filter(r=>g.codes.includes(r.code));if(g.name==='경영을 위한 경제학'&&valid.some(r=>r.code==='200.105')&&valid.some(r=>r.code==='200.106'))matches=[{code:'200.105 + 200.106',credits:0}];return {...g,matches,missing:matches.length===0};});
+ const names=new Map();function match(r,codes){if(codes.includes(r.code))return {...r,matchKind:r.codeInferred?'inferred_code':'code'};if(!names.has(r.name))names.set(r.name,exactCodes(r.name,catalog));const alternatives=names.get(r.name).filter(c=>codes.includes(c));return alternatives.length?{...r,matchKind:'same_name',requiredCodes:alternatives}:null;}
+ let areas=cba.map(g=>{let matches=pCourses.map(r=>match(r,g.codes)).filter(Boolean);if(g.name==='경영을 위한 경제학'&&valid.some(r=>r.code==='200.105')&&valid.some(r=>r.code==='200.106'))matches=[{code:'200.105 + 200.106',credits:0}];return {...g,matches,missing:matches.length===0};});
  const required=year>=2024?27:30; const primaryGoal=single?60:39; const rules=motRules(motVersion);
- const motAreas=mot?rules.map(g=>({...g,matches:mCourses.filter(r=>g.codes.includes(r.code)),missing:Math.max(0,g.count-mCourses.filter(r=>g.codes.includes(r.code)).length)})):[];
+ // A course fills at most one required area; use an augmenting-path matching
+ // so shared course lists cannot make one course satisfy several requirements.
+ const slots=[];if(mot)rules.forEach((g,area)=>{for(let i=0;i<g.count;i++)slots.push({area,edges:mCourses.map((r,index)=>({index,match:match(r,g.codes)})).filter(x=>x.match).sort((a,b)=>(a.match.matchKind==='code'?0:1)-(b.match.matchKind==='code'?0:1))});});
+ const occupied=new Map(),slotMatch=new Map();function assign(si,seen){for(const edge of slots[si].edges){if(seen.has(edge.index))continue;seen.add(edge.index);const previous=occupied.get(edge.index);if(previous===undefined||assign(previous,seen)){occupied.set(edge.index,si);slotMatch.set(si,edge.match);return true;}}return false;}
+ slots.forEach((_,i)=>assign(i,new Set()));
+ const motAreas=mot?rules.map((g,area)=>{const matches=slots.flatMap((s,i)=>s.area===area&&slotMatch.has(i)?[slotMatch.get(i)]:[]);return {...g,matches,missing:Math.max(0,g.count-matches.length)};}):[];
  const primaryRequired=areas.reduce((sum,area)=>sum+(area.matches.length?Math.min(area.credits,Math.max(...area.matches.map(m=>m.credits))):0),0);
  const motRequired=motAreas.reduce((sum,area)=>sum+area.matches.slice().sort((a,b)=>b.credits-a.credits).slice(0,area.count).reduce((x,r)=>x+Math.min(3,r.credits),0),0);
  const primaryElective=Math.max(0,primary-primaryRequired), techElective=Math.max(0,tech-motRequired);
  const restrictions=[['200.105','200.106','M2171.001900'],['M1338.003000','406.310'],['251.207A','406.315']].filter(g=>g.every(c=>mCourses.some(r=>r.code===c)));
  const graded=eligible.filter(r=>Object.prototype.hasOwnProperty.call(GRADES,r.grade));const gpaCredits=graded.reduce((s,r)=>s+r.credits,0); const gpa=gpaCredits?graded.reduce((s,r)=>s+r.credits*GRADES[r.grade],0)/gpaCredits:null;
- return {total,liberal,primary,tech,primaryRequired,primaryElective,motRequired,techElective,primaryRequiredRemaining:Math.max(0,required-primaryRequired),primaryElectiveRemaining:Math.max(0,primaryGoal-required-primaryElective),motRequiredRemaining:mot?Math.max(0,21-motRequired):0,motElectiveRemaining:mot?Math.max(0,18-techElective):0,totalRemaining:Math.max(0,130-total),liberalRemaining:Math.max(0,36-liberal),primaryRemaining:Math.max(0,primaryGoal-primary),techRemaining:mot?Math.max(0,39-tech):0,primaryGoal,required,areas,motAreas,unresolved,duplicateCodes,restrictions,gpa,gpaCredits,valid};
+ const sameNameMatches=[...areas,...motAreas].flatMap(area=>area.matches.filter(r=>r.matchKind==='same_name').map(r=>({...r,area:area.name})));
+ const overlapCount=valid.filter(r=>r.group==='양쪽 인정').length;
+ return {total,liberal,primary,tech,primaryRequired,primaryElective,motRequired,techElective,primaryRequiredRemaining:Math.max(0,required-primaryRequired),primaryElectiveRemaining:Math.max(0,primaryGoal-required-primaryElective),motRequiredRemaining:mot?Math.max(0,21-motRequired):0,motElectiveRemaining:mot?Math.max(0,18-techElective):0,totalRemaining:Math.max(0,130-total),liberalRemaining:Math.max(0,36-liberal),primaryRemaining:Math.max(0,primaryGoal-primary),techRemaining:mot?Math.max(0,39-tech):0,primaryGoal,required,areas,motAreas,unresolved,duplicateCodes,restrictions,gpa,gpaCredits,valid,sameNameMatches,overlapCount};
 }
 function semesters(today,n){let d=new Date(today),y=d.getFullYear(),m=d.getMonth()+1,s=(m>=3&&m<=8)?1:2;if(m<3)y--;let a=[];for(let i=0;i<n;i++){if(s===1)s=2;else{y++;s=1;}a.push(`${y}년 ${s}학기`);}return a;}
 function plan(audit,terms,cap,majorCap){
